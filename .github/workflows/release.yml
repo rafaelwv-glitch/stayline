@@ -25,7 +25,7 @@ jobs:
       - name: Generate icons
         run: node scripts/generate-icons.js
       - name: Build AppImage
-        run: npx electron-builder --linux AppImage --x64
+        run: npx electron-builder --linux AppImage --x64 --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"

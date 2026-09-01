@@ -16,8 +16,8 @@
   "scripts": {
     "start": "electron .",
     "icons": "node scripts/generate-icons.js",
-    "dist": "node scripts/generate-icons.js && electron-builder --linux AppImage",
-    "dist:dir": "node scripts/generate-icons.js && electron-builder --linux AppImage --dir"
+    "dist": "node scripts/generate-icons.js && electron-builder --linux AppImage --publish never",
+    "dist:dir": "node scripts/generate-icons.js && electron-builder --linux AppImage --dir --publish never"
   },
   "build": {
     "appId": "dev.stayline.app",
@@ -37,25 +37,20 @@
       "category": "Network",
       "icon": "assets/icons",
       "synopsis": "Microsoft Teams for Linux with locked presence",
-      "description": "Unofficial wrapper around the Microsoft Teams web client. Presence lock prevents automatic Away. Gestures match the official PWA.",
+      "executableName": "stayline",
       "desktop": {
-        "Name": "Stayline",
-        "Comment": "Unofficial Microsoft Teams client with presence lock",
-        "StartupWMClass": "stayline",
-        "MimeType": "x-scheme-handler/msteams;x-scheme-handler/ms-teams;",
-        "Keywords": "teams;microsoft;chat;presence;"
+        "entry": {
+          "Name": "Stayline",
+          "Comment": "Unofficial Microsoft Teams client with presence lock",
+          "StartupWMClass": "stayline",
+          "MimeType": "x-scheme-handler/msteams;x-scheme-handler/ms-teams;",
+          "Keywords": "teams;microsoft;chat;presence;"
+        }
       }
     },
     "appImage": {
       "artifactName": "Stayline-${version}-${arch}.AppImage"
-    },
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "rafaelwv-glitch",
-        "repo": "stayline"
-      }
-    ]
+    }
   },
   "devDependencies": {
     "electron": "^37.4.0",
