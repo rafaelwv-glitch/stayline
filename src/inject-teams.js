@@ -1,19 +1,22 @@
 "use strict";
 
 /**
- * Injected into the Teams page after load. Spoofs visibility, blocks Idle
- * Detection, and keeps Chromium from reporting the document as hidden.
+ * Injected into the Teams page after load. Spoofs visibility and blocks Idle
+ * Detection so presence lock can hold. Not used on login.microsoftonline.com —
+ * passkey / Authenticator popups need real focus and blur.
  */
 const INJECT_TEAMS_JS = `
 (() => {
   if (window.__staylineInjected) return true;
+  if (/login\\.microsoftonline|microsoftazuread-sso|msauth\\.net|login\\.live/.test(location.hostname)) {
+    return false;
+  }
   window.__staylineInjected = true;
 
   const spoof = () => {
     try {
       Object.defineProperty(document, "hidden", { configurable: true, get: () => false });
       Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
-      Object.defineProperty(document, "hasFocus", { configurable: true, value: () => true });
     } catch {}
   };
   spoof();
@@ -21,23 +24,10 @@ const INJECT_TEAMS_JS = `
   document.addEventListener("visibilitychange", (event) => {
     event.stopImmediatePropagation();
   }, true);
-  window.addEventListener("pagehide", (event) => {
-    event.stopImmediatePropagation();
-  }, true);
-  window.addEventListener("blur", (event) => {
-    event.stopImmediatePropagation();
-  }, true);
 
   try {
     if (navigator.idle && navigator.idle.queryState) {
       navigator.idle.queryState = async () => ({ userState: "active", screenState: "unlocked" });
-    }
-  } catch {}
-
-  try {
-    const desc = Object.getOwnPropertyDescriptor(Document.prototype, "hidden");
-    if (desc && desc.configurable) {
-      Object.defineProperty(Document.prototype, "hidden", { configurable: true, get: () => false });
     }
   } catch {}
 

@@ -1,6 +1,6 @@
 "use strict";
 
-const { app, BrowserWindow, BrowserView, ipcMain, shell, Menu, session, nativeTheme, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, Menu, session, nativeTheme, dialog } = require("electron");
 const path = require("node:path");
 const { DEFAULTS, loadConfig, saveConfig, loadWindowState, saveWindowState } = require("./config");
 const { applyFeatureParity } = require("./features");
@@ -16,6 +16,8 @@ const {
 
 const CHROME_HEIGHT = 44;
 const TEAMS_HOST_RE = /(^|\.)((microsoft|microsoftonline|office|office365|live|skype|teams)\.com)$/i;
+const AUTH_HOST_RE =
+  /(^|\.)((microsoft|microsoftonline|microsoftazuread-sso|msauth|msftauth|office|office365|live|skype|teams|windows\.net|azure)\.com)$/i;
 
 let mainWindow = null;
 let teamsView = null;
@@ -37,7 +39,9 @@ if (!gotLock) {
 } else {
   app.on("second-instance", (_event, argv) => {
     const url = argv.find((a) => a.startsWith("msteams:") || a.startsWith("ms-teams:"));
-    if (url && teamsView) teamsView.webContents.loadURL(translateProtocol(url));
+    if (url && teamsView && !teamsView.webContents.isDestroyed()) {
+      teamsView.webContents.loadURL(translateProtocol(url));
+    }
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.show();
@@ -57,7 +61,10 @@ if (!gotLock) {
 
 app.on("before-quit", () => {
   quitting = true;
-  for (const slot of slots.values()) slot.presence.stop();
+  for (const slot of slots.values()) {
+    slot.presence.stop();
+    if (slot.view && !slot.view.isDestroyed()) slot.view.destroy();
+  }
 });
 
 app.on("window-all-closed", () => {
@@ -118,8 +125,20 @@ function createMainWindow() {
     }
   });
   mainWindow.on("resize", layoutTeams);
+  mainWindow.on("move", layoutTeams);
   mainWindow.on("maximize", layoutTeams);
   mainWindow.on("unmaximize", layoutTeams);
+  mainWindow.on("hide", () => {
+    for (const slot of slots.values()) {
+      if (!slot.view.isDestroyed()) slot.view.hide();
+    }
+  });
+  mainWindow.on("show", () => {
+    if (teamsView && !teamsView.isDestroyed()) {
+      teamsView.show();
+      layoutTeams();
+    }
+  });
 
   for (const account of config.accounts) {
     ensureSlot(account);
@@ -144,6 +163,7 @@ function createMainWindow() {
     getActiveId: () => config.activeAccountId,
     switchAccount: (id) => showAccount(id),
     addAccount,
+    reloadTeams: () => activeContents()?.reload(),
     presence: {
       setEnabled: (enabled) => slots.get(config.activeAccountId)?.presence.setEnabled(enabled),
       setStatus: (status) => slots.get(config.activeAccountId)?.presence.setStatus(status),
@@ -153,9 +173,24 @@ function createMainWindow() {
 
   app.on("web-contents-created", (_event, contents) => {
     contents.setBackgroundThrottling(false);
+    bindAuthHardware(contents);
+    contents.setWindowOpenHandler((details) =>
+      onWindowOpen(details, contents.session?.partition || activeAccount()?.partition),
+    );
+    contents.on("did-create-window", (win) => {
+      if (win.isDestroyed()) return;
+      win.setAlwaysOnTop(true, "floating");
+      win.show();
+      win.focus();
+      win.once("ready-to-show", () => {
+        if (win.isDestroyed()) return;
+        win.show();
+        win.focus();
+      });
+    });
     contents.on("did-finish-load", () => {
       const url = contents.getURL();
-      if (/teams\.microsoft\.com|microsoftonline|office\.com/.test(url)) {
+      if (/teams\.microsoft\.com/.test(url)) {
         contents.executeJavaScript(INJECT_TEAMS_JS, true).catch(() => {});
       }
     });
@@ -178,6 +213,13 @@ function ensureSession(partition) {
   ses.on("will-download", (_event, item) => {
     item.setSaveDialogOptions({ title: "Save file · Stayline" });
   });
+  ses.setDevicePermissionHandler((details) => {
+    const origin = String(details.origin || "");
+    if (!/microsoft|windows\.net|office|live\.com|msauth|msftauth|azure/i.test(origin)) {
+      return false;
+    }
+    return details.deviceType === "hid" || details.deviceType === "usb";
+  });
   return ses;
 }
 
@@ -185,7 +227,18 @@ function ensureSlot(account) {
   if (slots.has(account.id)) return slots.get(account.id);
 
   const ses = ensureSession(account.partition);
-  const view = new BrowserView({
+  const view = new BrowserWindow({
+    parent: mainWindow,
+    modal: false,
+    frame: false,
+    show: false,
+    skipTaskbar: true,
+    autoHideMenuBar: true,
+    backgroundColor: "#0a0b0d",
+    minimizable: false,
+    maximizable: false,
+    closable: false,
+    paintWhenInitiallyHidden: true,
     webPreferences: {
       partition: account.partition,
       preload: path.join(__dirname, "preload-teams.js"),
@@ -201,9 +254,14 @@ function ensureSlot(account) {
   wc.setBackgroundThrottling(false);
   wc.setVisualZoomLevelLimits(1, 3).catch(() => {});
   wc.setWindowOpenHandler((details) => onWindowOpen(details, account.partition));
+  view.on("close", (event) => {
+    if (!quitting) event.preventDefault();
+  });
   wc.on("did-finish-load", () => {
-    wc.executeJavaScript(INJECT_TEAMS_JS, true).catch(() => {});
-    slots.get(account.id)?.presence.injectVisibility();
+    if (/teams\.microsoft\.com/.test(wc.getURL())) {
+      wc.executeJavaScript(INJECT_TEAMS_JS, true).catch(() => {});
+      slots.get(account.id)?.presence.injectVisibility();
+    }
     if (config.activeAccountId === account.id) pushChromeState();
   });
   wc.on("page-title-updated", (_e, title) => {
@@ -271,8 +329,13 @@ function showAccount(id, opts = {}) {
   teamsView = slot.view;
   presence = slot.presence;
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.setBrowserView(slot.view);
-    layoutTeams();
+    for (const other of slots.values()) {
+      if (other.view !== teamsView && !other.view.isDestroyed()) other.view.hide();
+    }
+    if (!teamsView.isDestroyed() && (opts.focus !== false || mainWindow.isVisible())) {
+      teamsView.show();
+      layoutTeams();
+    }
   }
   pushChromeState();
   trayApi?.rebuild();
@@ -304,12 +367,8 @@ async function removeAccount(id) {
     } catch {
       /* ignore */
     }
-    if (mainWindow && !mainWindow.isDestroyed() && teamsView === slot.view) {
-      mainWindow.setBrowserView(null);
-    }
-    if (!slot.view.webContents.isDestroyed()) {
-      slot.view.webContents.close();
-    }
+    if (teamsView === slot.view) teamsView = null;
+    if (!slot.view.isDestroyed()) slot.view.destroy();
     slots.delete(id);
   }
   config.accounts = config.accounts.filter((account) => account.id !== id);
@@ -343,14 +402,45 @@ function rememberIdentity(id, profile) {
 }
 
 function layoutTeams() {
-  if (!mainWindow || !teamsView) return;
-  const [width, height] = mainWindow.getContentSize();
+  if (!mainWindow || !teamsView || teamsView.isDestroyed()) return;
+  const parent = mainWindow.getContentBounds();
   teamsView.setBounds({
-    x: 0,
-    y: CHROME_HEIGHT,
-    width,
-    height: Math.max(120, height - CHROME_HEIGHT),
+    x: parent.x,
+    y: parent.y + CHROME_HEIGHT,
+    width: parent.width,
+    height: Math.max(120, parent.height - CHROME_HEIGHT),
   });
+}
+
+function activeContents() {
+  return teamsView && !teamsView.webContents.isDestroyed() ? teamsView.webContents : null;
+}
+
+function bindAuthHardware(wc) {
+  wc.on("select-hid-device", (event, details, callback) => {
+    event.preventDefault();
+    const devices = details.deviceList || [];
+    callback(devices[0] ? devices[0].deviceId : "");
+  });
+  wc.on("select-usb-device", (event, details, callback) => {
+    event.preventDefault();
+    const devices = details.deviceList || [];
+    callback(devices[0] || undefined);
+  });
+}
+
+function isAuthPopupUrl(url) {
+  if (!url || url === "about:blank" || url.startsWith("about:")) return true;
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return true;
+  }
+  if (parsed.protocol === "about:" || parsed.protocol === "blob:") return true;
+  const host = parsed.hostname || "";
+  if (!host) return true;
+  return AUTH_HOST_RE.test(host) || /aadcdn|msauth|msftauth|webauthn|login\.windows/i.test(host);
 }
 
 async function maybeAccountsHelp() {
@@ -379,30 +469,36 @@ function cleanUserAgent(ua) {
 }
 
 function onWindowOpen({ url }, partition) {
-  let parsed;
-  try {
-    parsed = new URL(url);
-  } catch {
+  const sessionPartition = partition || activeAccount().partition;
+  if (!isAuthPopupUrl(url)) {
+    try {
+      shell.openExternal(url);
+    } catch {
+      /* ignore */
+    }
     return { action: "deny" };
   }
-  const sessionPartition = partition || activeAccount().partition;
-  if (TEAMS_HOST_RE.test(parsed.hostname) || /microsoftonline|login\.live/.test(parsed.hostname)) {
-    return {
-      action: "allow",
-      overrideBrowserWindowOptions: {
-        autoHideMenuBar: true,
-        backgroundColor: "#0a0b0d",
-        webPreferences: {
-          partition: sessionPartition,
-          contextIsolation: true,
-          preload: path.join(__dirname, "preload-teams.js"),
-          backgroundThrottling: false,
-        },
+  return {
+    action: "allow",
+    overrideBrowserWindowOptions: {
+      parent: mainWindow || undefined,
+      modal: false,
+      autoHideMenuBar: true,
+      alwaysOnTop: true,
+      width: 520,
+      height: 740,
+      minWidth: 420,
+      minHeight: 560,
+      backgroundColor: "#ffffff",
+      webPreferences: {
+        partition: sessionPartition,
+        contextIsolation: true,
+        preload: path.join(__dirname, "preload-teams.js"),
+        backgroundThrottling: false,
+        sandbox: false,
       },
-    };
-  }
-  shell.openExternal(url);
-  return { action: "deny" };
+    },
+  };
 }
 
 function translateProtocol(url) {
@@ -450,22 +546,25 @@ function wireIpc() {
     return renameAccount(id, payload?.label);
   });
   ipcMain.handle("stayline:reload", () => {
-    if (teamsView) teamsView.webContents.reload();
+    activeContents()?.reload();
     return true;
   });
   ipcMain.handle("stayline:back", () => {
-    if (teamsView && teamsView.webContents.canGoBack()) teamsView.webContents.goBack();
+    const wc = activeContents();
+    if (wc && wc.canGoBack()) wc.goBack();
     return true;
   });
   ipcMain.handle("stayline:forward", () => {
-    if (teamsView && teamsView.webContents.canGoForward()) teamsView.webContents.goForward();
+    const wc = activeContents();
+    if (wc && wc.canGoForward()) wc.goForward();
     return true;
   });
   ipcMain.handle("stayline:zoom", (_e, delta) => {
-    if (!teamsView) return 1;
-    const next = teamsView.webContents.getZoomFactor() + Number(delta);
+    const wc = activeContents();
+    if (!wc) return 1;
+    const next = wc.getZoomFactor() + Number(delta);
     const clamped = Math.min(3, Math.max(0.7, next));
-    teamsView.webContents.setZoomFactor(clamped);
+    wc.setZoomFactor(clamped);
     return clamped;
   });
 }

@@ -15,6 +15,7 @@ function createTray({
   getActiveId,
   switchAccount,
   addAccount,
+  reloadTeams,
 }) {
   let image = nativeImage.createFromPath(iconPath);
   if (image.isEmpty()) {
@@ -81,11 +82,7 @@ function createTray({
       },
       {
         label: "Reload Teams",
-        click: () => {
-          const win = getMainWindow();
-          const view = win && win.getBrowserView();
-          if (view) view.webContents.reload();
-        },
+        click: () => reloadTeams?.(),
       },
       { type: "separator" },
       { label: "Quit", click: () => app.quit() },

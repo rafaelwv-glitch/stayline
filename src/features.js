@@ -14,6 +14,10 @@ function applyFeatureParity(config) {
     "VaapiVideoDecoder",
     "VaapiVideoEncoder",
     "CanvasOopRasterization",
+    "WebAuthentication",
+    "WebAuthenticationPasskeys",
+    "WebAuthenticationConditionalUI",
+    "WebAuthenticationHybridDelegatedUI",
   ];
 
   if (config.features?.overscrollHistory !== false) {

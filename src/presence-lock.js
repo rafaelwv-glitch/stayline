@@ -131,11 +131,19 @@ class PresenceLock {
         "media",
         "display-capture",
         "mediaKeySystem",
+        "clipboard-read",
         "clipboard-sanitized-write",
         "fullscreen",
         "pointerLock",
         "speaker-selection",
         "storage-access",
+        "openExternal",
+        "publickey-credentials-get",
+        "publickey-credentials-create",
+        "hid",
+        "usb",
+        "serial",
+        "local-fonts",
       ]);
       callback(allow.has(permission));
     });
