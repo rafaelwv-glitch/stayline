@@ -3,8 +3,19 @@
 const { Tray, Menu, nativeImage, app } = require("electron");
 const path = require("node:path");
 const { STATUS_MAP } = require("./presence-lock");
+const { accountMenuLabel } = require("./accounts");
 
-function createTray({ getMainWindow, getConfig, saveConfig, presence, iconPath }) {
+function createTray({
+  getMainWindow,
+  getConfig,
+  saveConfig,
+  presence,
+  iconPath,
+  getAccounts,
+  getActiveId,
+  switchAccount,
+  addAccount,
+}) {
   let image = nativeImage.createFromPath(iconPath);
   if (image.isEmpty()) {
     image = nativeImage.createFromPath(path.join(__dirname, "..", "assets", "icons", "icon.png"));
@@ -26,6 +37,15 @@ function createTray({ getMainWindow, getConfig, saveConfig, presence, iconPath }
       },
     }));
 
+    const accounts = typeof getAccounts === "function" ? getAccounts() : [];
+    const activeId = typeof getActiveId === "function" ? getActiveId() : null;
+    const accountItems = accounts.map((account) => ({
+      label: accountMenuLabel(account),
+      type: "radio",
+      checked: account.id === activeId,
+      click: () => switchAccount?.(account.id),
+    }));
+
     const menu = Menu.buildFromTemplate([
       { label: "Stayline", enabled: false },
       { type: "separator" },
@@ -41,6 +61,14 @@ function createTray({ getMainWindow, getConfig, saveConfig, presence, iconPath }
         },
       },
       { label: "Forced status", submenu: statusItems },
+      {
+        label: "Accounts",
+        submenu: [
+          ...accountItems,
+          { type: "separator" },
+          { label: "Add account…", click: () => addAccount?.() },
+        ],
+      },
       { type: "separator" },
       {
         label: "Show window",

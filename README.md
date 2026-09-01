@@ -18,8 +18,8 @@ The Teams PWA on Linux still flips you Away after a few idle minutes, even when 
 Download `Stayline-*-x86_64.AppImage` from [Releases](https://github.com/rafaelwv-glitch/stayline/releases/latest).
 
 ```bash
-chmod +x Stayline-1.0.0-x86_64.AppImage
-./Stayline-1.0.0-x86_64.AppImage
+chmod +x Stayline-1.1.0-x86_64.AppImage
+./Stayline-1.1.0-x86_64.AppImage
 ```
 
 Ubuntu 24.04+ may need FUSE:
@@ -30,9 +30,21 @@ sudo apt install libfuse2
 
 Sign in with your work account in the window. Stayline never sees your password.
 
+## Multiple tenants
+
+The Teams **web** client stores Entra cookies in one browser profile. Signing into a second work account from another home tenant overwrites the first. Stayline does not try to fight that inside one cookie jar.
+
+Instead, each account gets its own Chromium partition (`persist:stayline-<id>`). Add another tenant from the top bar **+**, the Accounts menu (`Ctrl+Shift+N`), or the tray. Switching uses `Alt+1`…`Alt+9`.
+
+- Existing Stayline sessions keep the original `persist:stayline` partition, so you are not signed out on upgrade.
+- Guest organisations of the **same** identity still use Teams’ own org switcher.
+- Distinct work identities (different home tenants) are Stayline accounts.
+- Presence lock keeps running on accounts you are not looking at.
+- Meeting pop-outs stay in the partition of the account that opened them.
+
 ## Presence lock
 
-The top bar and the tray menu both control the lock.
+The top bar and the tray menu both control the lock for the **active** account.
 
 | Status | Graph availability / activity |
 | --- | --- |
@@ -57,6 +69,16 @@ Config file: `~/.config/stayline/config.json`
   "preferredPresenceHours": 8,
   "minimizeToTray": true,
   "hardwareAcceleration": true,
+  "activeAccountId": "default",
+  "accounts": [
+    {
+      "id": "default",
+      "label": "Account 1",
+      "partition": "persist:stayline",
+      "lockEnabled": true,
+      "lockedStatus": "Available"
+    }
+  ],
   "features": {
     "pinchZoom": true,
     "overscrollHistory": true,

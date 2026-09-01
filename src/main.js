@@ -7,6 +7,12 @@ const { applyFeatureParity } = require("./features");
 const { PresenceLock } = require("./presence-lock");
 const { INJECT_TEAMS_JS } = require("./inject-teams");
 const { createTray } = require("./tray");
+const {
+  createAccount,
+  applyIdentity,
+  accountMenuLabel,
+  publicAccount,
+} = require("./accounts");
 
 const CHROME_HEIGHT = 44;
 const TEAMS_HOST_RE = /(^|\.)((microsoft|microsoftonline|office|office365|live|skype|teams)\.com)$/i;
@@ -17,6 +23,8 @@ let config = null;
 let presence = null;
 let trayApi = null;
 let quitting = false;
+const slots = new Map();
+const preparedSessions = new WeakSet();
 
 nativeTheme.themeSource = "dark";
 app.setName("Stayline");
@@ -49,7 +57,7 @@ if (!gotLock) {
 
 app.on("before-quit", () => {
   quitting = true;
-  if (presence) presence.stop();
+  for (const slot of slots.values()) slot.presence.stop();
 });
 
 app.on("window-all-closed", () => {
@@ -59,6 +67,15 @@ app.on("window-all-closed", () => {
 app.on("activate", () => {
   if (mainWindow) mainWindow.show();
 });
+
+function activeAccount() {
+  return config.accounts.find((account) => account.id === config.activeAccountId) || config.accounts[0];
+}
+
+function persist() {
+  config = saveConfig(config);
+  return config;
+}
 
 function createMainWindow() {
   const state = loadWindowState();
@@ -86,7 +103,7 @@ function createMainWindow() {
   if (state.isMaximized) mainWindow.maximize();
 
   mainWindow.loadFile(path.join(__dirname, "chrome", "index.html"));
-  installAppMenu();
+  rebuildMenu();
 
   mainWindow.once("ready-to-show", () => mainWindow.show());
   mainWindow.on("close", (event) => {
@@ -100,73 +117,33 @@ function createMainWindow() {
   mainWindow.on("maximize", layoutTeams);
   mainWindow.on("unmaximize", layoutTeams);
 
-  const ses = session.fromPartition(config.partition);
-  ses.setUserAgent(cleanUserAgent(ses.getUserAgent()));
-  ses.setDisplayMediaRequestHandler((_request, callback) => {
-    callback({ video: true, audio: "loopback" });
-  }, { useSystemPicker: true });
-  ses.on("will-download", (_event, item) => {
-    item.setSaveDialogOptions({ title: "Save file · Stayline" });
-  });
-
-  teamsView = new BrowserView({
-    webPreferences: {
-      partition: config.partition,
-      preload: path.join(__dirname, "preload-teams.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false,
-      spellcheck: true,
-      backgroundThrottling: false,
-    },
-  });
-  mainWindow.setBrowserView(teamsView);
-  layoutTeams();
-
-  const wc = teamsView.webContents;
-  wc.setBackgroundThrottling(false);
-  wc.setVisualZoomLevelLimits(1, 3).catch(() => {});
-  wc.setWindowOpenHandler(onWindowOpen);
-  wc.on("did-finish-load", () => {
-    wc.executeJavaScript(INJECT_TEAMS_JS, true).catch(() => {});
-    if (presence) presence.injectVisibility();
-    pushChromeState();
-  });
-  wc.on("page-title-updated", (_e, title) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.setTitle(title ? `${title} · Stayline` : "Stayline");
-    }
-  });
-  wc.on("zoom-changed", (_e, zoomDirection) => {
-    if (!config.features?.pinchZoom) return;
-    const next = wc.getZoomFactor() + (zoomDirection === "in" ? 0.1 : -0.1);
-    wc.setZoomFactor(Math.min(3, Math.max(0.7, next)));
-  });
-  wc.on("did-navigate", () => pushChromeState());
-  wc.on("did-navigate-in-page", () => pushChromeState());
-  wc.setUserAgent(cleanUserAgent(ses.getUserAgent()));
-
-  presence = new PresenceLock({
-    session: ses,
-    getContents: () => (teamsView && !teamsView.webContents.isDestroyed() ? teamsView.webContents : null),
-    getConfig: () => config,
-    userData: app.getPath("userData"),
-    onLog: (entry) => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send("stayline:log", entry);
-      }
-    },
-  });
-  presence.start();
+  for (const account of config.accounts) {
+    ensureSlot(account);
+  }
+  showAccount(activeAccount().id, { persist: false, focus: false });
 
   trayApi = createTray({
     getMainWindow: () => mainWindow,
     getConfig: () => config,
     saveConfig: (next) => {
-      config = saveConfig(next);
+      config = next;
+      persist();
+      const slot = slots.get(config.activeAccountId);
+      if (slot) {
+        slot.presence.setEnabled(config.lockEnabled);
+        slot.presence.setStatus(config.lockedStatus);
+      }
       pushChromeState();
+      rebuildMenu();
     },
-    presence,
+    getAccounts: () => config.accounts,
+    getActiveId: () => config.activeAccountId,
+    switchAccount: (id) => showAccount(id),
+    addAccount,
+    presence: {
+      setEnabled: (enabled) => slots.get(config.activeAccountId)?.presence.setEnabled(enabled),
+      setStatus: (status) => slots.get(config.activeAccountId)?.presence.setStatus(status),
+    },
     iconPath: icon,
   });
 
@@ -180,8 +157,185 @@ function createMainWindow() {
     });
   });
 
-  wc.loadURL(config.url);
   wireIpc();
+}
+
+function ensureSession(partition) {
+  const ses = session.fromPartition(partition);
+  if (preparedSessions.has(ses)) return ses;
+  preparedSessions.add(ses);
+  ses.setUserAgent(cleanUserAgent(ses.getUserAgent()));
+  ses.setDisplayMediaRequestHandler(
+    (_request, callback) => {
+      callback({ video: true, audio: "loopback" });
+    },
+    { useSystemPicker: true },
+  );
+  ses.on("will-download", (_event, item) => {
+    item.setSaveDialogOptions({ title: "Save file · Stayline" });
+  });
+  return ses;
+}
+
+function ensureSlot(account) {
+  if (slots.has(account.id)) return slots.get(account.id);
+
+  const ses = ensureSession(account.partition);
+  const view = new BrowserView({
+    webPreferences: {
+      partition: account.partition,
+      preload: path.join(__dirname, "preload-teams.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      spellcheck: true,
+      backgroundThrottling: false,
+    },
+  });
+
+  const wc = view.webContents;
+  wc.setBackgroundThrottling(false);
+  wc.setVisualZoomLevelLimits(1, 3).catch(() => {});
+  wc.setWindowOpenHandler((details) => onWindowOpen(details, account.partition));
+  wc.on("did-finish-load", () => {
+    wc.executeJavaScript(INJECT_TEAMS_JS, true).catch(() => {});
+    slots.get(account.id)?.presence.injectVisibility();
+    if (config.activeAccountId === account.id) pushChromeState();
+  });
+  wc.on("page-title-updated", (_e, title) => {
+    if (config.activeAccountId !== account.id) return;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.setTitle(title ? `${title} · Stayline` : "Stayline");
+    }
+  });
+  wc.on("zoom-changed", (_e, zoomDirection) => {
+    if (!config.features?.pinchZoom) return;
+    const next = wc.getZoomFactor() + (zoomDirection === "in" ? 0.1 : -0.1);
+    wc.setZoomFactor(Math.min(3, Math.max(0.7, next)));
+  });
+  wc.on("did-navigate", () => {
+    if (config.activeAccountId === account.id) pushChromeState();
+  });
+  wc.on("did-navigate-in-page", () => {
+    if (config.activeAccountId === account.id) pushChromeState();
+  });
+  wc.setUserAgent(cleanUserAgent(ses.getUserAgent()));
+
+  const lock = new PresenceLock({
+    session: ses,
+    accountId: account.id,
+    getContents: () => {
+      const slot = slots.get(account.id);
+      return slot && !slot.view.webContents.isDestroyed() ? slot.view.webContents : null;
+    },
+    getConfig: () => {
+      const acct = config.accounts.find((item) => item.id === account.id) || account;
+      return {
+        ...config,
+        lockEnabled: acct.lockEnabled,
+        lockedStatus: acct.lockedStatus,
+      };
+    },
+    userData: app.getPath("userData"),
+    onLog: (entry) => {
+      if (config.activeAccountId !== account.id) return;
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("stayline:log", entry);
+      }
+    },
+    onIdentity: (profile) => rememberIdentity(account.id, profile),
+  });
+  lock.start();
+
+  const slot = { accountId: account.id, view, session: ses, presence: lock };
+  slots.set(account.id, slot);
+  wc.loadURL(config.url);
+  return slot;
+}
+
+function showAccount(id, opts = {}) {
+  const account = config.accounts.find((item) => item.id === id);
+  if (!account) return chromeState();
+  const slot = ensureSlot(account);
+
+  config.activeAccountId = account.id;
+  config.lockEnabled = account.lockEnabled;
+  config.lockedStatus = account.lockedStatus;
+  config.partition = account.partition;
+  if (opts.persist !== false) persist();
+
+  teamsView = slot.view;
+  presence = slot.presence;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setBrowserView(slot.view);
+    layoutTeams();
+  }
+  pushChromeState();
+  trayApi?.rebuild();
+  rebuildMenu();
+  if (opts.focus !== false && mainWindow) {
+    mainWindow.show();
+    mainWindow.focus();
+  }
+  return chromeState();
+}
+
+function addAccount() {
+  const account = createAccount({
+    label: `Account ${config.accounts.length + 1}`,
+  });
+  config.accounts.push(account);
+  persist();
+  ensureSlot(account);
+  return showAccount(account.id);
+}
+
+async function removeAccount(id) {
+  if (config.accounts.length <= 1) return chromeState();
+  const slot = slots.get(id);
+  if (slot) {
+    slot.presence.stop();
+    try {
+      await slot.session.clearStorageData();
+    } catch {
+      /* ignore */
+    }
+    if (mainWindow && !mainWindow.isDestroyed() && teamsView === slot.view) {
+      mainWindow.setBrowserView(null);
+    }
+    if (!slot.view.webContents.isDestroyed()) {
+      slot.view.webContents.close();
+    }
+    slots.delete(id);
+  }
+  config.accounts = config.accounts.filter((account) => account.id !== id);
+  const nextId = config.activeAccountId === id ? config.accounts[0].id : config.activeAccountId;
+  persist();
+  return showAccount(nextId);
+}
+
+function renameAccount(id, label) {
+  const account = config.accounts.find((item) => item.id === id);
+  if (!account) return chromeState();
+  const next = String(label || "").trim();
+  if (!next) return chromeState();
+  account.label = next;
+  account.labelCustom = true;
+  persist();
+  pushChromeState();
+  trayApi?.rebuild();
+  rebuildMenu();
+  return chromeState();
+}
+
+function rememberIdentity(id, profile) {
+  const index = config.accounts.findIndex((item) => item.id === id);
+  if (index < 0) return;
+  config.accounts[index] = applyIdentity(config.accounts[index], profile);
+  persist();
+  pushChromeState();
+  trayApi?.rebuild();
+  rebuildMenu();
 }
 
 function layoutTeams() {
@@ -206,13 +360,14 @@ function cleanUserAgent(ua) {
   return ua.replace(/\sElectron\/[\d.]+/g, "").replace(/\sStayline\/[\d.]+/g, "");
 }
 
-function onWindowOpen({ url }) {
+function onWindowOpen({ url }, partition) {
   let parsed;
   try {
     parsed = new URL(url);
   } catch {
     return { action: "deny" };
   }
+  const sessionPartition = partition || activeAccount().partition;
   if (TEAMS_HOST_RE.test(parsed.hostname) || /microsoftonline|login\.live/.test(parsed.hostname)) {
     return {
       action: "allow",
@@ -220,7 +375,7 @@ function onWindowOpen({ url }) {
         autoHideMenuBar: true,
         backgroundColor: "#0a0b0d",
         webPreferences: {
-          partition: config.partition,
+          partition: sessionPartition,
           contextIsolation: true,
           preload: path.join(__dirname, "preload-teams.js"),
           backgroundThrottling: false,
@@ -250,18 +405,31 @@ function registerProtocols() {
 function wireIpc() {
   ipcMain.handle("stayline:get-state", () => chromeState());
   ipcMain.handle("stayline:set-lock", (_e, enabled) => {
-    config.lockEnabled = Boolean(enabled);
-    config = saveConfig(config);
-    presence.setEnabled(config.lockEnabled);
+    const account = activeAccount();
+    account.lockEnabled = Boolean(enabled);
+    config.lockEnabled = account.lockEnabled;
+    persist();
+    slots.get(account.id)?.presence.setEnabled(account.lockEnabled);
     trayApi?.rebuild();
+    rebuildMenu();
     return chromeState();
   });
   ipcMain.handle("stayline:set-status", (_e, status) => {
-    config.lockedStatus = String(status);
-    config = saveConfig(config);
-    presence.setStatus(config.lockedStatus);
+    const account = activeAccount();
+    account.lockedStatus = String(status);
+    config.lockedStatus = account.lockedStatus;
+    persist();
+    slots.get(account.id)?.presence.setStatus(account.lockedStatus);
     trayApi?.rebuild();
+    rebuildMenu();
     return chromeState();
+  });
+  ipcMain.handle("stayline:switch-account", (_e, id) => showAccount(String(id)));
+  ipcMain.handle("stayline:add-account", () => addAccount());
+  ipcMain.handle("stayline:remove-account", (_e, id) => removeAccount(String(id || activeAccount().id)));
+  ipcMain.handle("stayline:rename-account", (_e, payload) => {
+    const id = payload?.id || activeAccount().id;
+    return renameAccount(id, payload?.label);
   });
   ipcMain.handle("stayline:reload", () => {
     if (teamsView) teamsView.webContents.reload();
@@ -291,6 +459,8 @@ function chromeState() {
     pingIntervalSec: config.pingIntervalSec,
     url: config.url,
     version: app.getVersion(),
+    accounts: config.accounts.map(publicAccount),
+    activeAccountId: config.activeAccountId,
   };
 }
 
@@ -300,7 +470,15 @@ function pushChromeState() {
   }
 }
 
-function installAppMenu() {
+function rebuildMenu() {
+  const accountItems = config.accounts.map((account, index) => ({
+    label: accountMenuLabel(account),
+    type: "radio",
+    checked: account.id === config.activeAccountId,
+    accelerator: index < 9 ? `Alt+${index + 1}` : undefined,
+    click: () => showAccount(account.id),
+  }));
+
   const template = [
     {
       label: "Stayline",
@@ -312,15 +490,38 @@ function installAppMenu() {
           type: "checkbox",
           checked: config.lockEnabled,
           click: (item) => {
+            const account = activeAccount();
+            account.lockEnabled = item.checked;
             config.lockEnabled = item.checked;
-            config = saveConfig(config);
-            presence.setEnabled(item.checked);
+            persist();
+            slots.get(account.id)?.presence.setEnabled(item.checked);
             trayApi?.rebuild();
             pushChromeState();
           },
         },
         { type: "separator" },
         { role: "quit" },
+      ],
+    },
+    {
+      label: "Accounts",
+      submenu: [
+        ...accountItems,
+        { type: "separator" },
+        {
+          label: "Add account…",
+          accelerator: "CmdOrCtrl+Shift+N",
+          click: () => addAccount(),
+        },
+        {
+          label: "Rename account…",
+          click: () => promptRename(),
+        },
+        {
+          label: "Remove account",
+          enabled: config.accounts.length > 1,
+          click: () => removeAccount(config.activeAccountId),
+        },
       ],
     },
     {
@@ -357,4 +558,13 @@ function installAppMenu() {
     },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+async function promptRename() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const current = activeAccount().label;
+  const next = await mainWindow.webContents.executeJavaScript(
+    `window.prompt("Name this account", ${JSON.stringify(current)})`,
+  );
+  if (next) renameAccount(config.activeAccountId, next);
 }

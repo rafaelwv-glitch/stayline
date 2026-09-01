@@ -29,7 +29,9 @@ class PresenceLock {
    *   getContents: () => Electron.WebContents | null,
    *   getConfig: () => object,
    *   userData: string,
+   *   accountId?: string,
    *   onLog?: (entry: object) => void,
+   *   onIdentity?: (profile: object) => void,
    * }} opts
    */
   constructor(opts) {
@@ -37,15 +39,18 @@ class PresenceLock {
     this.getContents = opts.getContents;
     this.getConfig = opts.getConfig;
     this.userData = opts.userData;
+    this.accountId = opts.accountId || "default";
     this.onLog = opts.onLog || (() => {});
+    this.onIdentity = opts.onIdentity || (() => {});
     this.graphToken = null;
     this.skypeToken = null;
     this.userId = null;
-    this.sessionId = "stayline-lock";
+    this.sessionId = `stayline-lock-${this.accountId}`;
     this.pingTimer = null;
     this.refreshTimer = null;
     this.blockerId = null;
     this.started = false;
+    this.identified = false;
   }
 
   start() {
@@ -145,15 +150,17 @@ class PresenceLock {
       const headers = details.requestHeaders || {};
       const auth = headers.Authorization || headers.authorization;
       if (auth && /graph\.microsoft\.com/i.test(details.url)) {
+        const first = !this.graphToken;
         this.graphToken = auth;
         if (!this.userId) this.userId = parseOid(auth);
+        if (first) this.identify();
       }
       if (auth && /presence\.teams\.microsoft\.com/i.test(details.url)) {
         this.skypeToken = auth;
       }
       const skype = headers["x-skypetoken"] || headers["X-Skypetoken"];
       if (skype) this.skypeToken = String(skype);
-      persistTokens(this.userData, {
+      persistTokens(this.userData, this.accountId, {
         graphToken: this.graphToken,
         skypeToken: this.skypeToken,
         userId: this.userId,
@@ -236,6 +243,24 @@ class PresenceLock {
     }
   }
 
+  identify() {
+    if (this.identified || !this.graphToken) return;
+    this.identified = true;
+    graphProfile(this.graphToken)
+      .then((profile) => {
+        if (!profile) {
+          this.identified = false;
+          return;
+        }
+        this.userId = profile.id || this.userId;
+        this.onIdentity(profile);
+        this.log("assert", `Signed in · ${profile.email || profile.displayName || profile.id}`);
+      })
+      .catch(() => {
+        this.identified = false;
+      });
+  }
+
   injectVisibility() {
     const wc = this.getContents();
     if (!wc || wc.isDestroyed()) return;
@@ -248,22 +273,67 @@ class PresenceLock {
 }
 
 function parseOid(token) {
+  return parseClaims(token).oid || null;
+}
+
+function parseClaims(token) {
   try {
     const raw = String(token).replace(/^Bearer\s+/i, "");
     const payload = JSON.parse(Buffer.from(raw.split(".")[1], "base64url").toString("utf8"));
-    return payload.oid || payload.sub || null;
+    return {
+      oid: payload.oid || payload.sub || null,
+      tid: payload.tid || "",
+      upn: payload.upn || payload.unique_name || payload.preferred_username || payload.email || "",
+      name: payload.name || "",
+    };
   } catch {
-    return null;
+    return { oid: null, tid: "", upn: "", name: "" };
   }
 }
 
 async function graphMe(token) {
-  const res = await fetch(`${GRAPH}/me?$select=id`, {
-    headers: { Authorization: normalizeAuth(token) },
-  });
-  if (!res.ok) return null;
-  const json = await res.json();
-  return json.id || null;
+  const profile = await graphProfile(token);
+  return profile?.id || null;
+}
+
+async function graphProfile(token) {
+  const headers = { Authorization: normalizeAuth(token) };
+  const claims = parseClaims(token);
+  let displayName = claims.name;
+  let email = claims.upn;
+  let id = claims.oid;
+  let tenant = "";
+
+  try {
+    const res = await fetch(`${GRAPH}/me?$select=id,displayName,mail,userPrincipalName`, { headers });
+    if (res.ok) {
+      const me = await res.json();
+      id = me.id || id;
+      displayName = me.displayName || displayName;
+      email = me.mail || me.userPrincipalName || email;
+    }
+  } catch {
+    /* keep JWT claims */
+  }
+
+  try {
+    const res = await fetch(`${GRAPH}/organization?$select=id,displayName`, { headers });
+    if (res.ok) {
+      const org = await res.json();
+      tenant = org.value?.[0]?.displayName || "";
+    }
+  } catch {
+    /* optional */
+  }
+
+  if (!email && !id) return null;
+  return {
+    id,
+    displayName,
+    email,
+    tenant,
+    tid: claims.tid,
+  };
 }
 
 async function graphPost(token, pathname, body) {
@@ -296,9 +366,9 @@ function normalizeAuth(token) {
   return value.toLowerCase().startsWith("bearer ") ? value : `Bearer ${value}`;
 }
 
-function persistTokens(userData, bag) {
+function persistTokens(userData, accountId, bag) {
   try {
-    const file = path.join(userData, "session-meta.json");
+    const file = path.join(userData, `session-meta-${accountId}.json`);
     fs.writeFileSync(
       file,
       JSON.stringify({ userId: bag.userId, capturedAt: Date.now() }, null, 2),

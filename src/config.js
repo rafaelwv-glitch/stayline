@@ -3,6 +3,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { app } = require("electron");
+const { migrateAccounts, syncActiveAccount } = require("./accounts");
 
 const DEFAULTS = {
   url: "https://teams.microsoft.com/v2/",
@@ -15,6 +16,8 @@ const DEFAULTS = {
   hardwareAcceleration: true,
   openAtLogin: false,
   partition: "persist:stayline",
+  accounts: [],
+  activeAccountId: "default",
   features: {
     pinchZoom: true,
     overscrollHistory: true,
@@ -30,24 +33,26 @@ function loadConfig() {
   try {
     const raw = fs.readFileSync(configPath(), "utf8");
     const parsed = JSON.parse(raw);
-    return {
+    return migrateAccounts({
       ...DEFAULTS,
       ...parsed,
       features: { ...DEFAULTS.features, ...(parsed.features || {}) },
-    };
+    });
   } catch {
-    return { ...DEFAULTS, features: { ...DEFAULTS.features } };
+    return migrateAccounts({ ...DEFAULTS, features: { ...DEFAULTS.features } });
   }
 }
 
 function saveConfig(config) {
   const dir = path.dirname(configPath());
   fs.mkdirSync(dir, { recursive: true });
-  const next = {
-    ...DEFAULTS,
-    ...config,
-    features: { ...DEFAULTS.features, ...(config.features || {}) },
-  };
+  const next = migrateAccounts(
+    syncActiveAccount({
+      ...DEFAULTS,
+      ...config,
+      features: { ...DEFAULTS.features, ...(config.features || {}) },
+    }),
+  );
   fs.writeFileSync(configPath(), JSON.stringify(next, null, 2));
   return next;
 }

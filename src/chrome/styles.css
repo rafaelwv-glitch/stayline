@@ -20,7 +20,7 @@ html, body {
 
 .bar {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto minmax(140px, 220px) 1fr auto;
   align-items: center;
   gap: 12px;
   height: 44px;
@@ -35,10 +35,17 @@ html, body {
   font-weight: 500;
 }
 
-.status, .nav {
+.accounts, .status, .nav {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+}
+
+.accounts select {
+  flex: 1;
+  min-width: 0;
+  max-width: 220px;
 }
 
 .lock {
@@ -63,7 +70,7 @@ button {
 }
 
 .log {
-  max-width: 280px;
+  max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -72,6 +79,7 @@ button {
   font-size: 11px;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 980px) {
   .log { display: none; }
+  .bar { grid-template-columns: auto minmax(120px, 1fr) auto auto; }
 }
