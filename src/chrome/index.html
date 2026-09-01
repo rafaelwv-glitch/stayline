@@ -21,8 +21,13 @@
         <span>Stayline</span>
       </div>
       <div class="accounts">
-        <select id="account" aria-label="Account"></select>
-        <button type="button" id="add-account" title="Add account from another tenant">+</button>
+        <label class="account-label" for="account">Account</label>
+        <select id="account" aria-label="Account">
+          <option value="default">Account 1</option>
+        </select>
+        <button type="button" id="add-account" class="add-account">
+          Add account
+        </button>
       </div>
       <div class="status">
         <label class="lock">

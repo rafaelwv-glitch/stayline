@@ -1,6 +1,6 @@
 {
   "name": "stayline",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Unofficial Linux Microsoft Teams client with presence lock and PWA feature parity",
   "main": "src/main.js",
   "author": "Stayline",

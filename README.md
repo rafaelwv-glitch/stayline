@@ -18,8 +18,8 @@ The Teams PWA on Linux still flips you Away after a few idle minutes, even when 
 Download `Stayline-*-x86_64.AppImage` from [Releases](https://github.com/rafaelwv-glitch/stayline/releases/latest).
 
 ```bash
-chmod +x Stayline-1.1.0-x86_64.AppImage
-./Stayline-1.1.0-x86_64.AppImage
+chmod +x Stayline-1.1.1-x86_64.AppImage
+./Stayline-1.1.1-x86_64.AppImage
 ```
 
 Ubuntu 24.04+ may need FUSE:
