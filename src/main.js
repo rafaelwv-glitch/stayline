@@ -3,7 +3,7 @@
 const { app, BrowserWindow, BrowserView, ipcMain, shell, Menu, session, nativeTheme } = require("electron");
 const path = require("node:path");
 const { DEFAULTS, loadConfig, saveConfig, loadWindowState, saveWindowState } = require("./config");
-const { applyGestureParity } = require("./gestures");
+const { applyFeatureParity } = require("./features");
 const { PresenceLock } = require("./presence-lock");
 const { INJECT_TEAMS_JS } = require("./inject-teams");
 const { createTray } = require("./tray");
@@ -21,7 +21,7 @@ let quitting = false;
 nativeTheme.themeSource = "dark";
 app.setName("Stayline");
 app.setAppUserModelId("dev.stayline.app");
-applyGestureParity(DEFAULTS);
+applyFeatureParity(DEFAULTS);
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -138,7 +138,7 @@ function createMainWindow() {
     }
   });
   wc.on("zoom-changed", (_e, zoomDirection) => {
-    if (!config.gestures?.pinchZoom) return;
+    if (!config.features?.pinchZoom) return;
     const next = wc.getZoomFactor() + (zoomDirection === "in" ? 0.1 : -0.1);
     wc.setZoomFactor(Math.min(3, Math.max(0.7, next)));
   });

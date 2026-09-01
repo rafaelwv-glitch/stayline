@@ -15,7 +15,7 @@ const DEFAULTS = {
   hardwareAcceleration: true,
   openAtLogin: false,
   partition: "persist:stayline",
-  gestures: {
+  features: {
     pinchZoom: true,
     overscrollHistory: true,
     touchMode: true,
@@ -33,10 +33,10 @@ function loadConfig() {
     return {
       ...DEFAULTS,
       ...parsed,
-      gestures: { ...DEFAULTS.gestures, ...(parsed.gestures || {}) },
+      features: { ...DEFAULTS.features, ...(parsed.features || {}) },
     };
   } catch {
-    return { ...DEFAULTS, gestures: { ...DEFAULTS.gestures } };
+    return { ...DEFAULTS, features: { ...DEFAULTS.features } };
   }
 }
 
@@ -46,7 +46,7 @@ function saveConfig(config) {
   const next = {
     ...DEFAULTS,
     ...config,
-    gestures: { ...DEFAULTS.gestures, ...(config.gestures || {}) },
+    features: { ...DEFAULTS.features, ...(config.features || {}) },
   };
   fs.writeFileSync(configPath(), JSON.stringify(next, null, 2));
   return next;

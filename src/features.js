@@ -7,7 +7,7 @@ const { app } = require("electron");
  * pinch zoom, overscroll history, touch, PipeWire capture, no background
  * throttling (needed so presence heartbeats keep firing when occluded).
  */
-function applyGestureParity(config) {
+function applyFeatureParity(config) {
   const features = [
     "OverlayScrollbar",
     "WebRTCPipeWireCapturer",
@@ -16,7 +16,7 @@ function applyGestureParity(config) {
     "CanvasOopRasterization",
   ];
 
-  if (config.gestures?.overscrollHistory !== false) {
+  if (config.features?.overscrollHistory !== false) {
     features.push("TouchpadOverscrollHistoryNavigation");
     features.push("OverscrollHistoryNavigation");
   }
@@ -33,10 +33,10 @@ function applyGestureParity(config) {
   app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
   app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion,IdleDetection");
 
-  if (config.gestures?.pinchZoom !== false) {
+  if (config.features?.pinchZoom !== false) {
     app.commandLine.appendSwitch("enable-pinch");
   }
-  if (config.gestures?.touchMode !== false) {
+  if (config.features?.touchMode !== false) {
     app.commandLine.appendSwitch("touch-events", "enabled");
   }
   if (config.hardwareAcceleration === false) {
@@ -44,4 +44,4 @@ function applyGestureParity(config) {
   }
 }
 
-module.exports = { applyGestureParity };
+module.exports = { applyFeatureParity };

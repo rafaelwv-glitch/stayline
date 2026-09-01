@@ -57,7 +57,7 @@ Config file: `~/.config/stayline/config.json`
   "preferredPresenceHours": 8,
   "minimizeToTray": true,
   "hardwareAcceleration": true,
-  "gestures": {
+  "features": {
     "pinchZoom": true,
     "overscrollHistory": true,
     "touchMode": true
@@ -65,7 +65,7 @@ Config file: `~/.config/stayline/config.json`
 }
 ```
 
-## Gesture parity with the Teams PWA
+## Feature parity with the Teams PWA
 
 Stayline enables the same Chromium features as an installed Teams PWA:
 
