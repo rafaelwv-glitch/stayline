@@ -6,6 +6,7 @@ const { DEFAULTS, loadConfig, saveConfig, loadWindowState, saveWindowState } = r
 const { applyFeatureParity } = require("./features");
 const { PresenceLock } = require("./presence-lock");
 const { INJECT_TEAMS_JS } = require("./inject-teams");
+const { isLoginHost, isAuthContents, openAuthWindow, injectAuth } = require("./auth-window");
 const { createTray } = require("./tray");
 const {
   createAccount,
@@ -179,17 +180,23 @@ function createMainWindow() {
     );
     contents.on("did-create-window", (win) => {
       if (win.isDestroyed()) return;
-      win.setAlwaysOnTop(true, "floating");
       win.show();
       win.focus();
+      win.moveTop();
       win.once("ready-to-show", () => {
         if (win.isDestroyed()) return;
         win.show();
         win.focus();
+        win.moveTop();
       });
+    });
+    contents.on("dom-ready", () => {
+      const url = contents.getURL();
+      if (isLoginHost(url)) injectAuth(contents);
     });
     contents.on("did-finish-load", () => {
       const url = contents.getURL();
+      if (isLoginHost(url)) injectAuth(contents);
       if (/teams\.microsoft\.com/.test(url)) {
         contents.executeJavaScript(INJECT_TEAMS_JS, true).catch(() => {});
       }
@@ -254,11 +261,24 @@ function ensureSlot(account) {
   wc.setBackgroundThrottling(false);
   wc.setVisualZoomLevelLimits(1, 3).catch(() => {});
   wc.setWindowOpenHandler((details) => onWindowOpen(details, account.partition));
+  const detourLogin = (event, url) => {
+    if (!isLoginHost(url) || isAuthContents(wc)) return;
+    event.preventDefault();
+    launchAuth(account, url);
+  };
+  wc.on("will-navigate", detourLogin);
+  wc.on("will-redirect", detourLogin);
   view.on("close", (event) => {
     if (!quitting) event.preventDefault();
   });
   wc.on("did-finish-load", () => {
-    if (/teams\.microsoft\.com/.test(wc.getURL())) {
+    const url = wc.getURL();
+    if (isLoginHost(url) && !isAuthContents(wc)) {
+      launchAuth(account, url);
+      wc.loadURL(config.url);
+      return;
+    }
+    if (/teams\.microsoft\.com/.test(url)) {
       wc.executeJavaScript(INJECT_TEAMS_JS, true).catch(() => {});
       slots.get(account.id)?.presence.injectVisibility();
     }
@@ -416,6 +436,29 @@ function activeContents() {
   return teamsView && !teamsView.webContents.isDestroyed() ? teamsView.webContents : null;
 }
 
+function launchAuth(account, url) {
+  const icon = path.join(__dirname, "..", "assets", "icons", "512x512.png");
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("stayline:log", { at: Date.now(), text: "sign-in window opened" });
+  }
+  openAuthWindow({
+    account,
+    url,
+    icon,
+    onLog: (entry) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("stayline:log", entry);
+      }
+    },
+    onSignedIn: (nextUrl) => {
+      const slot = slots.get(account.id);
+      if (slot && !slot.view.webContents.isDestroyed()) {
+        slot.view.webContents.loadURL(nextUrl);
+      }
+    },
+  });
+}
+
 function bindAuthHardware(wc) {
   wc.on("select-hid-device", (event, details, callback) => {
     event.preventDefault();
@@ -478,18 +521,25 @@ function onWindowOpen({ url }, partition) {
     }
     return { action: "deny" };
   }
+  let isMeeting = false;
+  try {
+    isMeeting = /teams\.microsoft\.com/.test(new URL(url).hostname);
+  } catch {
+    isMeeting = false;
+  }
   return {
     action: "allow",
     overrideBrowserWindowOptions: {
-      parent: mainWindow || undefined,
+      parent: undefined,
       modal: false,
       autoHideMenuBar: true,
-      alwaysOnTop: true,
-      width: 520,
-      height: 740,
-      minWidth: 420,
-      minHeight: 560,
-      backgroundColor: "#ffffff",
+      alwaysOnTop: !isMeeting,
+      skipTaskbar: false,
+      width: isMeeting ? 1280 : 520,
+      height: isMeeting ? 800 : 780,
+      minWidth: isMeeting ? 720 : 420,
+      minHeight: isMeeting ? 500 : 560,
+      backgroundColor: isMeeting ? "#0a0b0d" : "#ffffff",
       webPreferences: {
         partition: sessionPartition,
         contextIsolation: true,

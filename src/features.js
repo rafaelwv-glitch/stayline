@@ -18,6 +18,7 @@ function applyFeatureParity(config) {
     "WebAuthenticationPasskeys",
     "WebAuthenticationConditionalUI",
     "WebAuthenticationHybridDelegatedUI",
+    "WebAuthenticationHybrid",
   ];
 
   if (config.features?.overscrollHistory !== false) {
