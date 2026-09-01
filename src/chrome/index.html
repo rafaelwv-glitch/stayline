@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;"
+    />
+    <title>Stayline</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="bar">
+      <div class="brand">
+        <svg viewBox="0 0 32 32" width="18" height="18" aria-hidden="true">
+          <rect x="3" y="3" width="26" height="26" rx="7" fill="#181b1f" stroke="#2a2e33" />
+          <path d="M11.5 14.2V12.4a4.5 4.5 0 0 1 9 0v1.8" fill="none" stroke="#ececea" stroke-width="1.7" stroke-linecap="round" />
+          <rect x="10" y="14.2" width="12" height="9.3" rx="2.2" fill="none" stroke="#ececea" stroke-width="1.7" />
+          <circle cx="16" cy="18.6" r="1.5" fill="#3dcc7a" />
+        </svg>
+        <span>Stayline</span>
+      </div>
+      <div class="status">
+        <label class="lock">
+          <input id="lock" type="checkbox" checked />
+          <span>Lock</span>
+        </label>
+        <select id="status" aria-label="Forced status">
+          <option value="Available">Available</option>
+          <option value="Busy">Busy</option>
+          <option value="DoNotDisturb">Do not disturb</option>
+          <option value="BeRightBack">Be right back</option>
+          <option value="Away">Away</option>
+          <option value="Offline">Appear offline</option>
+        </select>
+      </div>
+      <div class="nav">
+        <button type="button" id="back" title="Back">‹</button>
+        <button type="button" id="forward" title="Forward">›</button>
+        <button type="button" id="reload" title="Reload">↻</button>
+        <span id="log" class="log">presence lock armed</span>
+      </div>
+    </header>
+    <script src="./chrome.js"></script>
+  </body>
+</html>
