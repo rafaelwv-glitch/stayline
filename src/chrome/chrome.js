@@ -24,6 +24,10 @@ function applyState(state) {
   if (!state) return;
   lockEl.checked = Boolean(state.lockEnabled);
   if (state.lockedStatus) statusEl.value = state.lockedStatus;
+  if (state.version) {
+    const ver = document.getElementById("ver");
+    if (ver) ver.textContent = state.version;
+  }
   renderAccounts(state);
 }
 

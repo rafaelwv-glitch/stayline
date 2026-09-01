@@ -1,6 +1,6 @@
 "use strict";
 
-const { app, BrowserWindow, BrowserView, ipcMain, shell, Menu, session, nativeTheme } = require("electron");
+const { app, BrowserWindow, BrowserView, ipcMain, shell, Menu, session, nativeTheme, dialog } = require("electron");
 const path = require("node:path");
 const { DEFAULTS, loadConfig, saveConfig, loadWindowState, saveWindowState } = require("./config");
 const { applyFeatureParity } = require("./features");
@@ -103,9 +103,13 @@ function createMainWindow() {
   if (state.isMaximized) mainWindow.maximize();
 
   mainWindow.loadFile(path.join(__dirname, "chrome", "index.html"));
+  mainWindow.setTitle(`Stayline ${app.getVersion()}`);
   rebuildMenu();
 
-  mainWindow.once("ready-to-show", () => mainWindow.show());
+  mainWindow.once("ready-to-show", () => {
+    mainWindow.show();
+    maybeAccountsHelp();
+  });
   mainWindow.on("close", (event) => {
     persistBounds();
     if (!quitting && config.minimizeToTray) {
@@ -205,7 +209,7 @@ function ensureSlot(account) {
   wc.on("page-title-updated", (_e, title) => {
     if (config.activeAccountId !== account.id) return;
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.setTitle(title ? `${title} · Stayline` : "Stayline");
+      mainWindow.setTitle(title ? `${title} · Stayline ${app.getVersion()}` : `Stayline ${app.getVersion()}`);
     }
   });
   wc.on("zoom-changed", (_e, zoomDirection) => {
@@ -347,6 +351,20 @@ function layoutTeams() {
     width,
     height: Math.max(120, height - CHROME_HEIGHT),
   });
+}
+
+async function maybeAccountsHelp() {
+  if (config.seenAccountsHelp || !mainWindow || mainWindow.isDestroyed()) return;
+  await dialog.showMessageBox(mainWindow, {
+    type: "info",
+    title: `Stayline ${app.getVersion()}`,
+    message: "Add another tenant from the top bar",
+    detail:
+      "Click Add account (white button next to the account list). Each work account gets its own session so Teams cannot overwrite the first login.\n\nIf that button is missing, Stayline is still running an older copy in the tray. Choose Quit there, then start this AppImage again.",
+    buttons: ["Got it"],
+  });
+  config.seenAccountsHelp = true;
+  persist();
 }
 
 function persistBounds() {

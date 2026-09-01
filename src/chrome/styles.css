@@ -37,6 +37,13 @@ html, body {
   flex: 0 0 auto;
 }
 
+.ver {
+  color: var(--muted);
+  font-family: ui-monospace, "IBM Plex Mono", monospace;
+  font-size: 11px;
+  font-weight: 400;
+}
+
 .accounts, .status, .nav {
   display: flex;
   align-items: center;

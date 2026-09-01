@@ -21,7 +21,7 @@ function createTray({
     image = nativeImage.createFromPath(path.join(__dirname, "..", "assets", "icons", "icon.png"));
   }
   const tray = new Tray(image.resize({ width: 16, height: 16 }));
-  tray.setToolTip("Stayline");
+  tray.setToolTip(`Stayline ${app.getVersion()}`);
 
   const rebuild = () => {
     const cfg = getConfig();
@@ -47,7 +47,7 @@ function createTray({
     }));
 
     const menu = Menu.buildFromTemplate([
-      { label: "Stayline", enabled: false },
+      { label: `Stayline ${app.getVersion()}`, enabled: false },
       { type: "separator" },
       {
         label: "Presence lock",

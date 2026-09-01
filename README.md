@@ -18,8 +18,8 @@ The Teams PWA on Linux still flips you Away after a few idle minutes, even when 
 Download `Stayline-*-x86_64.AppImage` from [Releases](https://github.com/rafaelwv-glitch/stayline/releases/latest).
 
 ```bash
-chmod +x Stayline-1.1.1-x86_64.AppImage
-./Stayline-1.1.1-x86_64.AppImage
+chmod +x Stayline-1.1.2-x86_64.AppImage
+./Stayline-1.1.2-x86_64.AppImage
 ```
 
 Ubuntu 24.04+ may need FUSE:
@@ -29,6 +29,8 @@ sudo apt install libfuse2
 ```
 
 Sign in with your work account in the window. Stayline never sees your password.
+
+If an older Stayline is already in the tray, the new AppImage will only focus that old window. Choose **Quit** from the tray, then start `Stayline-1.1.2-x86_64.AppImage`. The top bar must show the version number and an **Add account** button.
 
 ## Multiple tenants
 
