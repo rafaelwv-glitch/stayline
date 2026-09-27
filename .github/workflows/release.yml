@@ -37,6 +37,7 @@ jobs:
         with:
           name: Stayline-x64
           path: dist/*.AppImage
+          retention-days: 3
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
